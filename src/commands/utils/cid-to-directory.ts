@@ -2,7 +2,7 @@ import { exporter, ExporterOptions } from 'ipfs-unixfs-exporter'
 import type { CID } from 'multiformats/cid'
 import type { PBNode } from '@ipld/dag-pb'
 import type { Blockstore } from 'interface-blockstore'
-import { NotADirectoryError } from './errors'
+import { NotADirectoryError } from './errors.js'
 
 export interface Directory {
   cid: CID

@@ -52,7 +52,7 @@ describe('cp', () => {
     const target = CID.createV1(identity.code, hash)
 
     await expect(fs.cp(source, target, 'foo')).to.eventually.be.rejected
-      .with.property('code', 'ERR_NOT_DIRECTORY')
+      .with.property('code', 'ERR_NOT_A_DIRECTORY')
   })
 
   it('refuses to copy files from an unreadable node', async () => {
