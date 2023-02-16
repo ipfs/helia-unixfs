@@ -1,4 +1,3 @@
-import { InvalidParametersError, NotADirectoryError } from '@helia/interface/errors'
 import { CID } from 'multiformats/cid'
 import mergeOpts from 'merge-options'
 import { logger } from '@libp2p/logger'
@@ -12,6 +11,7 @@ import { exporter } from 'ipfs-unixfs-exporter'
 import { cidToDirectory } from './utils/cid-to-directory.js'
 import { cidToPBLink } from './utils/cid-to-pblink.js'
 import { SHARD_SPLIT_THRESHOLD_BYTES } from './utils/constants.js'
+import { InvalidParametersError, NotADirectoryError } from './utils/errors.js'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 const log = logger('helia:unixfs:mkdir')

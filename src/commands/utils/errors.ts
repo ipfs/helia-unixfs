@@ -39,3 +39,27 @@ export class DoesNotExistError extends UnixFSError {
     super(message, 'DoesNotExistError', 'ERR_DOES_NOT_EXIST')
   }
 }
+
+export class NoContentError extends UnixFSError {
+  constructor (message = 'no content') {
+    super(message, 'NoContentError', 'ERR_NO_CONTENT')
+  }
+}
+
+export class NotAFileError extends UnixFSError {
+  constructor (message = 'not a file') {
+    super(message, 'NotAFileError', 'ERR_NOT_A_FILE')
+  }
+}
+
+export class NotADirectoryError extends UnixFSError {
+  constructor (message = 'not a directory') {
+    super(message, 'NotADirectoryError', 'ERR_NOT_A_DIRECTORY')
+  }
+}
+
+export class InvalidParametersError extends UnixFSError {
+  constructor (message = 'invalid parameters') {
+    super(message, 'InvalidParametersError', 'ERR_INVALID_PARAMETERS')
+  }
+}

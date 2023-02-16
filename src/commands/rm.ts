@@ -1,4 +1,3 @@
-import { InvalidParametersError } from '@helia/interface/errors'
 import type { Blockstore } from 'interface-blockstore'
 import type { CID } from 'multiformats/cid'
 import type { RmOptions } from '../index.js'
@@ -7,6 +6,7 @@ import { logger } from '@libp2p/logger'
 import { removeLink } from './utils/remove-link.js'
 import { cidToDirectory } from './utils/cid-to-directory.js'
 import { SHARD_SPLIT_THRESHOLD_BYTES } from './utils/constants.js'
+import { InvalidParametersError } from './utils/errors.js'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 const log = logger('helia:unixfs:rm')

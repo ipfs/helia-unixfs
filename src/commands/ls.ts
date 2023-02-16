@@ -1,10 +1,10 @@
-import { NoContentError, NotADirectoryError } from '@helia/interface/errors'
 import { exporter, UnixFSEntry } from 'ipfs-unixfs-exporter'
 import type { CID } from 'multiformats/cid'
 import type { LsOptions } from '../index.js'
 import { resolve } from './utils/resolve.js'
 import mergeOpts from 'merge-options'
 import type { Blockstore } from 'interface-blockstore'
+import { NoContentError, NotADirectoryError } from './utils/errors.js'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 
