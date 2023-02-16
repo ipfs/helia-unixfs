@@ -1,5 +1,5 @@
 import { InvalidParametersError } from '@helia/interface/errors'
-import type { Blockstore } from 'ipfs-unixfs-exporter'
+import type { Blockstore } from 'interface-blockstore'
 import type { CID } from 'multiformats/cid'
 import type { CpOptions } from '../index.js'
 import mergeOpts from 'merge-options'
@@ -7,12 +7,14 @@ import { logger } from '@libp2p/logger'
 import { addLink } from './utils/add-link.js'
 import { cidToPBLink } from './utils/cid-to-pblink.js'
 import { cidToDirectory } from './utils/cid-to-directory.js'
+import { SHARD_SPLIT_THRESHOLD_BYTES } from './utils/constants.js'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 const log = logger('helia:unixfs:cp')
 
-const defaultOptions = {
-  force: false
+const defaultOptions: CpOptions = {
+  force: false,
+  shardSplitThresholdBytes: SHARD_SPLIT_THRESHOLD_BYTES
 }
 
 export async function cp (source: CID, target: CID, name: string, blockstore: Blockstore, options: Partial<CpOptions> = {}): Promise<CID> {
@@ -34,6 +36,7 @@ export async function cp (source: CID, target: CID, name: string, blockstore: Bl
 
   const result = await addLink(directory, pblink, blockstore, {
     allowOverwriting: opts.force,
+    cidVersion: target.version,
     ...opts
   })
 

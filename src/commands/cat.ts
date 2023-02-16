@@ -1,9 +1,10 @@
 import { NoContentError, NotAFileError } from '@helia/interface/errors'
-import { Blockstore, exporter } from 'ipfs-unixfs-exporter'
+import { exporter } from 'ipfs-unixfs-exporter'
 import type { CID } from 'multiformats/cid'
 import type { CatOptions } from '../index.js'
 import { resolve } from './utils/resolve.js'
 import mergeOpts from 'merge-options'
+import type { Blockstore } from 'interface-blockstore'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 

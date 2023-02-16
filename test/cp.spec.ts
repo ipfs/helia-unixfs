@@ -8,6 +8,9 @@ import type { Blockstore } from 'interface-blockstore'
 import { unixfs, UnixFS } from '../src/index.js'
 import { MemoryBlockstore } from 'blockstore-core'
 import toBuffer from 'it-to-buffer'
+import { importContent, importBytes } from 'ipfs-unixfs-importer'
+import { createShardedDirectory } from './fixtures/create-sharded-directory.js'
+import first from 'it-first'
 
 describe('cp', () => {
   let blockstore: Blockstore
@@ -18,7 +21,9 @@ describe('cp', () => {
     blockstore = new MemoryBlockstore()
 
     fs = unixfs({ blockstore })
-    emptyDirCid = await fs.add({ path: 'empty' })
+
+    const imported = await importContent({ path: 'empty' }, blockstore)
+    emptyDirCid = imported.cid
   })
 
   it('refuses to copy files without a source', async () => {
@@ -43,7 +48,7 @@ describe('cp', () => {
 
   it('refuses to copy files to an unreadable node', async () => {
     const hash = identity.digest(uint8ArrayFromString('derp'))
-    const source = await fs.add(Uint8Array.from([0, 1, 3, 4]))
+    const { cid: source } = await importBytes(Uint8Array.from([0, 1, 3, 4]), blockstore)
     const target = CID.createV1(identity.code, hash)
 
     await expect(fs.cp(source, target, 'foo')).to.eventually.be.rejected
@@ -60,17 +65,22 @@ describe('cp', () => {
 
   it('refuses to copy files to an existing file', async () => {
     const path = 'path'
-    const source = await fs.add(Uint8Array.from([0, 1, 3, 4]))
+    const { cid: source } = await importBytes(Uint8Array.from([0, 1, 3, 4]), blockstore)
     const target = await fs.cp(source, emptyDirCid, path)
 
     await expect(fs.cp(source, target, path)).to.eventually.be.rejected
       .with.property('code', 'ERR_ALREADY_EXISTS')
+
+    // should succeed with force option
+    await expect(fs.cp(source, target, path, {
+      force: true
+    })).to.eventually.be.ok()
   })
 
   it('copies a file to new location', async () => {
     const data = Uint8Array.from([0, 1, 3, 4])
     const path = 'path'
-    const source = await fs.add(data)
+    const { cid: source } = await importBytes(data, blockstore)
     const dirCid = await fs.cp(source, emptyDirCid, path)
 
     const bytes = await toBuffer(fs.cat(dirCid, {
@@ -91,111 +101,69 @@ describe('cp', () => {
     })
   })
 
-/*
-  describe('with sharding', () => {
-    it('copies a sharded directory to a normal directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
+  it('copies a sharded directory to a normal directory', async () => {
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const path = 'sharded-dir'
+    const containingDirCid = await fs.cp(shardedDirCid, emptyDirCid, path)
 
-      const normalDir = `dir-${Math.random()}`
-      const normalDirPath = `/${normalDir}`
+    // should still be a regular directory
+    await expect(fs.stat(containingDirCid)).to.eventually.have.nested.property('unixfs.type', 'directory')
 
-      await ipfs.files.mkdir(normalDirPath)
-
-      await ipfs.files.cp(shardedDirPath, normalDirPath)
-
-      const finalShardedDirPath = `${normalDirPath}${shardedDirPath}`
-
-      // should still be a sharded directory
-      await expect(isShardAtPath(finalShardedDirPath, ipfs)).to.eventually.be.true()
-      expect((await ipfs.files.stat(finalShardedDirPath)).type).to.equal('directory')
-
-      const files = await all(ipfs.files.ls(finalShardedDirPath))
-
-      expect(files.length).to.be.ok()
+    const subDirStats = await fs.stat(containingDirCid, {
+      path
     })
-
-    it('copies a normal directory to a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-
-      const normalDir = `dir-${Math.random()}`
-      const normalDirPath = `/${normalDir}`
-
-      await ipfs.files.mkdir(normalDirPath)
-
-      await ipfs.files.cp(normalDirPath, shardedDirPath)
-
-      const finalDirPath = `${shardedDirPath}${normalDirPath}`
-
-      // should still be a sharded directory
-      await expect(isShardAtPath(shardedDirPath, ipfs)).to.eventually.be.true()
-      expect((await ipfs.files.stat(shardedDirPath)).type).to.equal('directory')
-      expect((await ipfs.files.stat(finalDirPath)).type).to.equal('directory')
-    })
-
-    it('copies a file from a normal directory to a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-
-      const file = `file-${Math.random()}.txt`
-      const filePath = `/${file}`
-      const finalFilePath = `${shardedDirPath}/${file}`
-
-      await ipfs.files.write(filePath, Uint8Array.from([0, 1, 2, 3]), {
-        create: true
-      })
-
-      await ipfs.files.cp(filePath, finalFilePath)
-
-      // should still be a sharded directory
-      await expect(isShardAtPath(shardedDirPath, ipfs)).to.eventually.be.true()
-      expect((await ipfs.files.stat(shardedDirPath)).type).to.equal('directory')
-      expect((await ipfs.files.stat(finalFilePath)).type).to.equal('file')
-    })
-
-    it('copies a file from a sharded directory to a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-      const othershardedDirPath = await createShardedDirectory(ipfs)
-
-      const file = `file-${Math.random()}.txt`
-      const filePath = `${shardedDirPath}/${file}`
-      const finalFilePath = `${othershardedDirPath}/${file}`
-
-      await ipfs.files.write(filePath, Uint8Array.from([0, 1, 2, 3]), {
-        create: true
-      })
-
-      await ipfs.files.cp(filePath, finalFilePath)
-
-      // should still be a sharded directory
-      await expect(isShardAtPath(shardedDirPath, ipfs)).to.eventually.be.true()
-      expect((await ipfs.files.stat(shardedDirPath)).type).to.equal('directory')
-      await expect(isShardAtPath(othershardedDirPath, ipfs)).to.eventually.be.true()
-      expect((await ipfs.files.stat(othershardedDirPath)).type).to.equal('directory')
-      expect((await ipfs.files.stat(finalFilePath)).type).to.equal('file')
-    })
-
-    it('copies a file from a sharded directory to a normal directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-      const dir = `dir-${Math.random()}`
-      const dirPath = `/${dir}`
-
-      const file = `file-${Math.random()}.txt`
-      const filePath = `${shardedDirPath}/${file}`
-      const finalFilePath = `${dirPath}/${file}`
-
-      await ipfs.files.write(filePath, Uint8Array.from([0, 1, 2, 3]), {
-        create: true
-      })
-
-      await ipfs.files.mkdir(dirPath)
-
-      await ipfs.files.cp(filePath, finalFilePath)
-
-      // should still be a sharded directory
-      await expect(isShardAtPath(shardedDirPath, ipfs)).to.eventually.be.true()
-      expect((await ipfs.files.stat(shardedDirPath)).type).to.equal('directory')
-      expect((await ipfs.files.stat(dirPath)).type).to.equal('directory')
-      expect((await ipfs.files.stat(finalFilePath)).type).to.equal('file')
-    })
+    expect(subDirStats).to.have.nested.property('unixfs.type', 'hamt-sharded-directory')
+    expect(subDirStats.cid).to.eql(shardedDirCid)
   })
-  */
+
+  it('copies a normal directory to a sharded directory', async () => {
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const path = 'normal-dir'
+    const containingDirCid = await fs.cp(emptyDirCid, shardedDirCid, path)
+
+    // should still be a sharded directory
+    await expect(fs.stat(containingDirCid)).to.eventually.have.nested.property('unixfs.type', 'hamt-sharded-directory')
+
+    const subDirStats = await fs.stat(containingDirCid, {
+      path
+    })
+    expect(subDirStats).to.have.nested.property('unixfs.type', 'directory')
+    expect(subDirStats.cid).to.eql(emptyDirCid)
+  })
+
+  it('copies a file from a normal directory to a sharded directory', async () => {
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const path = `file-${Math.random()}.txt`
+    const { cid: fileCid } = await importBytes(Uint8Array.from([0, 1, 2, 3]), blockstore, {
+      rawLeaves: false
+    })
+
+    const containingDirCid = await fs.cp(fileCid, shardedDirCid, path)
+
+    // should still be a sharded directory
+    await expect(fs.stat(containingDirCid)).to.eventually.have.nested.property('unixfs.type', 'hamt-sharded-directory')
+
+    const fileInDirStats = await fs.stat(containingDirCid, {
+      path
+    })
+    expect(fileInDirStats).to.have.nested.property('unixfs.type', 'file')
+    expect(fileInDirStats.cid).to.eql(fileCid)
+  })
+
+  it('refuses to copy files to an existing file in a sharded directory', async () => {
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const file = await first(fs.ls(shardedDirCid))
+
+    if (file == null) {
+      throw new Error('No files listed')
+    }
+
+    await expect(fs.cp(file.cid, shardedDirCid, file.name)).to.eventually.be.rejected
+      .with.property('code', 'ERR_ALREADY_EXISTS')
+
+    // should succeed with force option
+    await expect(fs.cp(file.cid, shardedDirCid, file.name, {
+      force: true
+    })).to.eventually.be.ok()
+  })
 })

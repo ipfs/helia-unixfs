@@ -1,5 +1,5 @@
 import * as dagPB from '@ipld/dag-pb'
-import { CID } from 'multiformats/cid'
+import { CID, Version } from 'multiformats/cid'
 import { logger } from '@libp2p/logger'
 import { UnixFS } from 'ipfs-unixfs'
 import { DirSharded } from './dir-sharded.js'
@@ -12,7 +12,6 @@ import {
   addLinksToHamtBucket
 } from './hamt-utils.js'
 import last from 'it-last'
-import type { Blockstore } from 'ipfs-unixfs-exporter'
 import type { PBNode, PBLink } from '@ipld/dag-pb/interface'
 import { sha256 } from 'multiformats/hashes/sha2'
 import type { Bucket } from 'hamt-sharding'
@@ -21,6 +20,8 @@ import { InvalidParametersError } from '@helia/interface/errors'
 import type { ImportResult } from 'ipfs-unixfs-importer'
 import type { AbortOptions } from '@libp2p/interfaces'
 import type { Directory } from './cid-to-directory.js'
+import type { Blockstore } from 'interface-blockstore'
+import { isOverShardThreshold } from './is-over-shard-threshold.js'
 
 const log = logger('helia:unixfs:components:utils:add-link')
 
@@ -32,22 +33,11 @@ export interface AddLinkResult {
 
 export interface AddLinkOptions extends AbortOptions {
   allowOverwriting: boolean
+  shardSplitThresholdBytes: number
+  cidVersion: Version
 }
 
 export async function addLink (parent: Directory, child: Required<PBLink>, blockstore: Blockstore, options: AddLinkOptions): Promise<AddLinkResult> {
-  if (parent.node.Data == null) {
-    throw new InvalidParametersError('Invalid parent passed to addLink')
-  }
-
-  // FIXME: this should work on block size not number of links
-  if (parent.node.Links.length >= 1000) {
-    log('converting directory to sharded directory')
-
-    const result = await convertToShardedDirectory(parent, blockstore)
-    parent.cid = result.cid
-    parent.node = dagPB.decode(await blockstore.get(result.cid))
-  }
-
   if (parent.node.Data == null) {
     throw new InvalidParametersError('Invalid parent passed to addLink')
   }
@@ -62,7 +52,17 @@ export async function addLink (parent: Directory, child: Required<PBLink>, block
 
   log(`adding ${child.Name} (${child.Hash}) to regular directory`)
 
-  return await addToDirectory(parent, child, blockstore, options)
+  const result = await addToDirectory(parent, child, blockstore, options)
+
+  if (await isOverShardThreshold(result.node, blockstore, options.shardSplitThresholdBytes)) {
+    log('converting directory to sharded directory')
+
+    const converted = await convertToShardedDirectory(result, blockstore)
+    result.cid = converted.cid
+    result.node = dagPB.decode(await blockstore.get(converted.cid))
+  }
+
+  return result
 }
 
 const convertToShardedDirectory = async (parent: Directory, blockstore: Blockstore): Promise<ImportResult> => {
@@ -74,11 +74,12 @@ const convertToShardedDirectory = async (parent: Directory, blockstore: Blocksto
 
   const result = await createShard(blockstore, parent.node.Links.map(link => ({
     name: (link.Name ?? ''),
-    size: link.Tsize ?? 0,
+    size: BigInt(link.Tsize ?? 0),
     cid: link.Hash
   })), {
     mode: unixfs.mode,
-    mtime: unixfs.mtime
+    mtime: unixfs.mtime,
+    cidVersion: parent.cid.version
   })
 
   log(`Converted directory to sharded directory ${result.cid}`)
@@ -112,7 +113,7 @@ const addToDirectory = async (parent: Directory, child: PBLink, blockstore: Bloc
     const secs = Math.floor(ms / 1000)
 
     node.mtime = {
-      secs,
+      secs: BigInt(secs),
       nsecs: (ms - (secs * 1000)) * 1000
     }
 
@@ -154,13 +155,7 @@ const addToShardedDirectory = async (parent: Directory, child: Required<PBLink>,
 
   // we have written out the shard, but only one sub-shard will have been written so replace it in the original shard
   const parentLinks = parent.node.Links.filter((link) => {
-    const matches = (link.Name ?? '').substring(0, 2) === path[0].prefix
-
-    if (matches && !options.allowOverwriting) {
-      throw new AlreadyExistsError()
-    }
-
-    return !matches
+    return (link.Name ?? '').substring(0, 2) !== path[0].prefix
   })
 
   const newLink = node.Links
@@ -172,7 +167,10 @@ const addToShardedDirectory = async (parent: Directory, child: Required<PBLink>,
 
   parentLinks.push(newLink)
 
-  return await updateHamtDirectory(parent, blockstore, parentLinks, path[0].bucket, options)
+  return await updateHamtDirectory({
+    Data: parent.node.Data,
+    Links: parentLinks
+  }, blockstore, path[0].bucket, options)
 }
 
 const addFileToShardedDirectory = async (parent: Directory, child: Required<PBLink>, blockstore: Blockstore, options: AddLinkOptions): Promise<{ shard: DirSharded, path: BucketPath[] }> => {
@@ -202,7 +200,7 @@ const addFileToShardedDirectory = async (parent: Directory, child: Required<PBLi
   if (node.mtime != null) {
     // update mtime if previously set
     shard.mtime = {
-      secs: Math.round(Date.now() / 1000)
+      secs: BigInt(Math.round(Date.now() / 1000))
     }
   }
 
@@ -233,6 +231,10 @@ const addFileToShardedDirectory = async (parent: Directory, child: Required<PBLi
     }
 
     if (link.Name === `${segment.prefix}${child.Name}`) {
+      if (!options.allowOverwriting) {
+        throw new AlreadyExistsError()
+      }
+
       // file already existed, file will be added to the current bucket
       log(`Link ${segment.prefix}${child.Name} will be replaced`)
       index = path.length
@@ -279,7 +281,7 @@ const addFileToShardedDirectory = async (parent: Directory, child: Required<PBLi
 
   // finally add the new file into the shard
   await shard._bucket.put(child.Name, {
-    size: child.Tsize,
+    size: BigInt(child.Tsize),
     cid: child.Hash
   })
 

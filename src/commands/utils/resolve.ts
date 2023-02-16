@@ -1,5 +1,5 @@
 import type { CID } from 'multiformats/cid'
-import { Blockstore, exporter } from 'ipfs-unixfs-exporter'
+import { exporter } from 'ipfs-unixfs-exporter'
 import type { AbortOptions } from '@libp2p/interfaces'
 import { InvalidParametersError } from '@helia/interface/errors'
 import { logger } from '@libp2p/logger'
@@ -7,13 +7,14 @@ import { DoesNotExistError } from './errors.js'
 import { addLink } from './add-link.js'
 import { cidToDirectory } from './cid-to-directory.js'
 import { cidToPBLink } from './cid-to-pblink.js'
+import type { Blockstore } from 'interface-blockstore'
 
 const log = logger('helia:unixfs:components:utils:add-link')
 
 export interface Segment {
   name: string
   cid: CID
-  size: number
+  size: bigint
 }
 
 export interface ResolveResult {
@@ -43,7 +44,7 @@ export async function resolve (cid: CID, path: string | undefined, blockstore: B
   const segments: Segment[] = [{
     name: '',
     cid,
-    size: 0
+    size: 0n
   }]
 
   for (let i = 0; i < parts.length; i++) {
@@ -88,11 +89,15 @@ export async function resolve (cid: CID, path: string | undefined, blockstore: B
   }
 }
 
+export interface UpdatePathCidsOptions extends AbortOptions {
+  shardSplitThresholdBytes: number
+}
+
 /**
  * Where we have descended into a DAG to update a child node, ascend up the DAG creating
  * new hashes and blocks for the changed content
  */
-export async function updatePathCids (cid: CID, result: ResolveResult, blockstore: Blockstore, options: AbortOptions): Promise<CID> {
+export async function updatePathCids (cid: CID, result: ResolveResult, blockstore: Blockstore, options: UpdatePathCidsOptions): Promise<CID> {
   if (result.segments == null || result.segments.length === 0) {
     return cid
   }
@@ -118,7 +123,8 @@ export async function updatePathCids (cid: CID, result: ResolveResult, blockstor
 
     const result = await addLink(directory, pblink, blockstore, {
       ...options,
-      allowOverwriting: true
+      allowOverwriting: true,
+      cidVersion: cid.version
     })
 
     cid = result.cid

@@ -7,6 +7,8 @@ import { unixfs, UnixFS } from '../src/index.js'
 import { MemoryBlockstore } from 'blockstore-core'
 import type { CID } from 'multiformats/cid'
 import type { Mtime } from 'ipfs-unixfs'
+import { importContent } from 'ipfs-unixfs-importer'
+import { createShardedDirectory } from './fixtures/create-sharded-directory.js'
 
 describe('mkdir', () => {
   let blockstore: Blockstore
@@ -19,10 +21,13 @@ describe('mkdir', () => {
 
     fs = unixfs({ blockstore })
 
-    emptyDirCid = await fs.add({ path: 'empty' })
-    emptyDirCidV0 = await fs.add({ path: 'empty' }, {
+    const imported = await importContent({ path: 'empty' }, blockstore)
+    emptyDirCid = imported.cid
+
+    const importedV0 = await importContent({ path: 'empty' }, blockstore, {
       cidVersion: 0
     })
+    emptyDirCidV0 = importedV0.cid
   })
 
   async function testMode (mode: number | undefined, expectedMode: number): Promise<void> {
@@ -94,25 +99,25 @@ describe('mkdir', () => {
 
   it('should make directory and specify mtime as { nsecs, secs }', async function () {
     const mtime = {
-      secs: 5,
+      secs: 5n,
       nsecs: 0
     }
+
     await testMtime(mtime, mtime)
   })
-/*
-  describe('with sharding', () => {
-    it('makes a directory inside a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-      const dirPath = `${shardedDirPath}/subdir-${Math.random()}`
 
-      await ipfs.files.mkdir(`${dirPath}`)
+  it('makes a directory inside a sharded directory', async () => {
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const dirName = `subdir-${Math.random()}`
 
-      await expect(isShardAtPath(shardedDirPath, ipfs)).to.eventually.be.true()
-      await expect(ipfs.files.stat(shardedDirPath)).to.eventually.have.property('type', 'directory')
+    const updatedShardCid = await fs.mkdir(shardedDirCid, dirName)
 
-      await expect(isShardAtPath(dirPath, ipfs)).to.eventually.be.false()
-      await expect(ipfs.files.stat(dirPath)).to.eventually.have.property('type', 'directory')
-    })
+    // should still be a sharded directory
+    await expect(fs.stat(updatedShardCid)).to.eventually.have.nested.property('unixfs.type', 'hamt-sharded-directory')
+
+    // subdir should be a regular directory
+    await expect(fs.stat(updatedShardCid, {
+      path: dirName
+    })).to.eventually.have.nested.property('unixfs.type', 'directory')
   })
-  */
 })

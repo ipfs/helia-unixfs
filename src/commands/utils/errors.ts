@@ -1,31 +1,41 @@
-import { HeliaError } from '@helia/interface/errors'
+export abstract class UnixFSError extends Error {
+  public readonly name: string
+  public readonly code: string
 
-export class NotUnixFSError extends HeliaError {
+  constructor (message: string, name: string, code: string) {
+    super(message)
+
+    this.name = name
+    this.code = code
+  }
+}
+
+export class NotUnixFSError extends UnixFSError {
   constructor (message = 'not a Unixfs node') {
     super(message, 'NotUnixFSError', 'ERR_NOT_UNIXFS')
   }
 }
 
-export class InvalidPBNodeError extends HeliaError {
+export class InvalidPBNodeError extends UnixFSError {
   constructor (message = 'invalid PBNode') {
     super(message, 'InvalidPBNodeError', 'ERR_INVALID_PBNODE')
   }
 }
 
-export class UnknownError extends HeliaError {
+export class UnknownError extends UnixFSError {
   constructor (message = 'unknown error') {
     super(message, 'InvalidPBNodeError', 'ERR_UNKNOWN_ERROR')
   }
 }
 
-export class AlreadyExistsError extends HeliaError {
+export class AlreadyExistsError extends UnixFSError {
   constructor (message = 'path already exists') {
-    super(message, 'NotUnixFSError', 'ERR_ALREADY_EXISTS')
+    super(message, 'AlreadyExistsError', 'ERR_ALREADY_EXISTS')
   }
 }
 
-export class DoesNotExistError extends HeliaError {
+export class DoesNotExistError extends UnixFSError {
   constructor (message = 'path does not exist') {
-    super(message, 'NotUnixFSError', 'ERR_DOES_NOT_EXIST')
+    super(message, 'DoesNotExistError', 'ERR_DOES_NOT_EXIST')
   }
 }

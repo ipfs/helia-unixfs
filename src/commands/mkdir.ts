@@ -11,13 +11,15 @@ import { sha256 } from 'multiformats/hashes/sha2'
 import { exporter } from 'ipfs-unixfs-exporter'
 import { cidToDirectory } from './utils/cid-to-directory.js'
 import { cidToPBLink } from './utils/cid-to-pblink.js'
+import { SHARD_SPLIT_THRESHOLD_BYTES } from './utils/constants.js'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 const log = logger('helia:unixfs:mkdir')
 
-const defaultOptions = {
+const defaultOptions: MkdirOptions = {
   cidVersion: 1,
-  force: false
+  force: false,
+  shardSplitThresholdBytes: SHARD_SPLIT_THRESHOLD_BYTES
 }
 
 export async function mkdir (parentCid: CID, dirname: string, blockstore: Blockstore, options: Partial<MkdirOptions> = {}): Promise<CID> {

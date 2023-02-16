@@ -1,39 +1,28 @@
-import { encode, prepare } from '@ipld/dag-pb'
+import { encode, PBLink, prepare } from '@ipld/dag-pb'
 import { UnixFS } from 'ipfs-unixfs'
-import { persist } from './persist.js'
+import { persist, PersistOptions } from './persist.js'
 import { createHAMT, Bucket, BucketChild } from 'hamt-sharding'
 import {
   hamtHashCode,
-  hamtHashFn,
-  hamtBucketBits
+  hamtHashFn
 } from './hamt-constants.js'
-import type { CID, Version } from 'multiformats/cid'
-import type { PBNode } from '@ipld/dag-pb/interface'
+import { CID } from 'multiformats/cid'
 import type { Mtime } from 'ipfs-unixfs'
-import type { BlockCodec } from 'multiformats/codecs/interface'
-import type { Blockstore } from 'ipfs-unixfs-importer'
+import type { Blockstore } from 'interface-blockstore'
 
-export interface ImportResult {
+interface InProgressImportResult extends ImportResult {
+  single?: boolean
+  originalPath?: string
+}
+
+interface ImportResult {
   cid: CID
-  node: PBNode
-  size: number
+  size: bigint
+  path?: string
+  unixfs?: UnixFS
 }
 
-export interface DirContents {
-  cid?: CID
-  size?: number
-}
-
-export interface DirOptions {
-  mtime?: Mtime
-  mode?: number
-  codec?: BlockCodec<any, any>
-  cidVersion?: Version
-  onlyHash?: boolean
-  signal?: AbortSignal
-}
-
-export interface DirProps {
+interface DirProps {
   root: boolean
   dir: boolean
   path: string
@@ -46,23 +35,25 @@ export interface DirProps {
   mtime?: Mtime
 }
 
-export abstract class Dir {
-  protected options: DirOptions
-  protected root: boolean
-  protected dir: boolean
-  protected path: string
-  protected dirty: boolean
-  protected flat: boolean
-  protected parent?: Dir
-  protected parentKey?: string
-  protected unixfs?: UnixFS
-  protected mode?: number
+abstract class Dir {
+  public options: PersistOptions
+  public root: boolean
+  public dir: boolean
+  public path: string
+  public dirty: boolean
+  public flat: boolean
+  public parent?: Dir
+  public parentKey?: string
+  public unixfs?: UnixFS
+  public mode?: number
   public mtime?: Mtime
-  protected cid?: CID
-  protected size?: number
+  public cid?: CID
+  public size?: number
+  public nodeSize?: number
 
-  constructor (props: DirProps, options: DirOptions) {
+  constructor (props: DirProps, options: PersistOptions) {
     this.options = options ?? {}
+
     this.root = props.root
     this.dir = props.dir
     this.path = props.path
@@ -74,26 +65,36 @@ export abstract class Dir {
     this.mode = props.mode
     this.mtime = props.mtime
   }
+
+  abstract put (name: string, value: InProgressImportResult | Dir): Promise<void>
+  abstract get (name: string): Promise<InProgressImportResult | Dir | undefined>
+  abstract eachChildSeries (): AsyncIterable<{ key: string, child: InProgressImportResult | Dir }>
+  abstract flush (blockstore: Blockstore): AsyncGenerator<ImportResult>
+  abstract estimateNodeSize (): number
+  abstract childCount (): number
 }
 
 export class DirSharded extends Dir {
-  public _bucket: Bucket<DirContents>
+  public _bucket: Bucket<InProgressImportResult | Dir>
 
-  constructor (props: DirProps, options: DirOptions) {
+  constructor (props: DirProps, options: PersistOptions) {
     super(props, options)
 
-    /** @type {Bucket<DirContents>} */
     this._bucket = createHAMT({
       hashFn: hamtHashFn,
-      bits: hamtBucketBits
+      bits: 8
     })
   }
 
-  async put (name: string, value: DirContents): Promise<void> {
+  async put (name: string, value: InProgressImportResult | Dir): Promise<void> {
+    this.cid = undefined
+    this.size = undefined
+    this.nodeSize = undefined
+
     await this._bucket.put(name, value)
   }
 
-  async get (name: string): Promise<DirContents | undefined> {
+  async get (name: string): Promise<InProgressImportResult | Dir | undefined> {
     return await this._bucket.get(name)
   }
 
@@ -105,11 +106,11 @@ export class DirSharded extends Dir {
     return this._bucket.childrenCount()
   }
 
-  onlyChild (): Bucket<DirContents> | BucketChild<DirContents> {
+  onlyChild (): Bucket<InProgressImportResult | Dir> | BucketChild<InProgressImportResult | Dir> {
     return this._bucket.onlyChild()
   }
 
-  async * eachChildSeries (): AsyncGenerator<{ key: string, child: DirContents }> {
+  async * eachChildSeries (): AsyncGenerator<{ key: string, child: InProgressImportResult | Dir }> {
     for await (const { key, value } of this._bucket.eachLeafSeries()) {
       yield {
         key,
@@ -118,15 +119,30 @@ export class DirSharded extends Dir {
     }
   }
 
-  async * flush (blockstore: Blockstore): AsyncIterable<ImportResult> {
-    yield * flush(this._bucket, blockstore, this, this.options)
+  estimateNodeSize (): number {
+    if (this.nodeSize !== undefined) {
+      return this.nodeSize
+    }
+
+    this.nodeSize = calculateSize(this._bucket, this, this.options)
+
+    return this.nodeSize
+  }
+
+  async * flush (blockstore: Blockstore): AsyncGenerator<ImportResult> {
+    for await (const entry of flush(this._bucket, blockstore, this, this.options)) {
+      yield {
+        ...entry,
+        path: this.path
+      }
+    }
   }
 }
 
-async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: any, options: DirOptions): AsyncIterable<ImportResult> {
+async function * flush (bucket: Bucket<Dir | InProgressImportResult>, blockstore: Blockstore, shardRoot: DirSharded | null, options: PersistOptions): AsyncIterable<ImportResult> {
   const children = bucket._children
-  const links = []
-  let childrenSize = 0
+  const links: PBLink[] = []
+  let childrenSize = 0n
 
   for (let i = 0; i < children.length; i++) {
     const child = children.get(i)
@@ -138,7 +154,7 @@ async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: 
     const labelPrefix = i.toString(16).toUpperCase().padStart(2, '0')
 
     if (child instanceof Bucket) {
-      let shard: ImportResult | undefined
+      let shard
 
       for await (const subShard of flush(child, blockstore, null, options)) {
         shard = subShard
@@ -150,13 +166,13 @@ async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: 
 
       links.push({
         Name: labelPrefix,
-        Tsize: shard.size,
+        Tsize: Number(shard.size),
         Hash: shard.cid
       })
       childrenSize += shard.size
-    } else if (typeof child.value.flush === 'function') {
+    } else if (isDir(child.value)) {
       const dir = child.value
-      let flushedDir
+      let flushedDir: ImportResult | undefined
 
       for await (const entry of dir.flush(blockstore)) {
         flushedDir = entry
@@ -164,14 +180,18 @@ async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: 
         yield flushedDir
       }
 
+      if (flushedDir == null) {
+        throw new Error('Did not flush dir')
+      }
+
       const label = labelPrefix + child.key
       links.push({
         Name: label,
-        Tsize: flushedDir.size,
+        Tsize: Number(flushedDir.size),
         Hash: flushedDir.cid
       })
 
-      childrenSize += flushedDir.size // eslint-disable-line @typescript-eslint/restrict-plus-operands
+      childrenSize += flushedDir.size
     } else {
       const value = child.value
 
@@ -184,10 +204,10 @@ async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: 
 
       links.push({
         Name: label,
-        Tsize: size,
+        Tsize: Number(size),
         Hash: value.cid
       })
-      childrenSize += size ?? 0 // eslint-disable-line @typescript-eslint/restrict-plus-operands
+      childrenSize += BigInt(size ?? 0)
     }
   }
 
@@ -197,7 +217,7 @@ async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: 
   const dir = new UnixFS({
     type: 'hamt-sharded-directory',
     data,
-    fanout: bucket.tableSize(),
+    fanout: BigInt(bucket.tableSize()),
     hashType: hamtHashCode,
     mtime: shardRoot?.mtime,
     mode: shardRoot?.mode
@@ -209,11 +229,90 @@ async function * flush (bucket: Bucket<any>, blockstore: Blockstore, shardRoot: 
   }
   const buffer = encode(prepare(node))
   const cid = await persist(buffer, blockstore, options)
-  const size = buffer.length + childrenSize
+  const size = BigInt(buffer.byteLength) + childrenSize
 
   yield {
     cid,
-    node,
+    unixfs: dir,
     size
   }
 }
+
+function isDir (obj: any): obj is Dir {
+  return typeof obj.flush === 'function'
+}
+
+function calculateSize (bucket: Bucket<any>, shardRoot: DirSharded | null, options: PersistOptions): number {
+  const children = bucket._children
+  const links: PBLink[] = []
+
+  for (let i = 0; i < children.length; i++) {
+    const child = children.get(i)
+
+    if (child == null) {
+      continue
+    }
+
+    const labelPrefix = i.toString(16).toUpperCase().padStart(2, '0')
+
+    if (child instanceof Bucket) {
+      const size = calculateSize(child, null, options)
+
+      links.push({
+        Name: labelPrefix,
+        Tsize: Number(size),
+        Hash: options.cidVersion === 0 ? CID_V0 : CID_V1
+      })
+    } else if (typeof child.value.flush === 'function') {
+      const dir = child.value
+      const size = dir.nodeSize()
+
+      links.push({
+        Name: labelPrefix + child.key,
+        Tsize: Number(size),
+        Hash: options.cidVersion === 0 ? CID_V0 : CID_V1
+      })
+    } else {
+      const value = child.value
+
+      if (value.cid == null) {
+        continue
+      }
+
+      const label = labelPrefix + child.key
+      const size = value.size
+
+      links.push({
+        Name: label,
+        Tsize: Number(size),
+        Hash: value.cid
+      })
+    }
+  }
+
+  // go-ipfs uses little endian, that's why we have to
+  // reverse the bit field before storing it
+  const data = Uint8Array.from(children.bitField().reverse())
+  const dir = new UnixFS({
+    type: 'hamt-sharded-directory',
+    data,
+    fanout: BigInt(bucket.tableSize()),
+    hashType: hamtHashCode,
+    mtime: shardRoot?.mtime,
+    mode: shardRoot?.mode
+  })
+
+  const buffer = encode(prepare({
+    Data: dir.marshal(),
+    Links: links
+  }))
+
+  return buffer.length
+}
+
+// we use these to calculate the node size to use as a check for whether a directory
+// should be sharded or not. Since CIDs have a constant length and We're only
+// interested in the data length and not the actual content identifier we can use
+// any old CID instead of having to hash the data which is expensive.
+export const CID_V0 = CID.parse('QmUNLLsPACCz1vLxQVkXqqLX5R1X345qqfHbsf67hvA3Nn')
+export const CID_V1 = CID.parse('zdj7WbTaiJT1fgatdet9Ei9iDB5hdCxkbVyhyh8YTUnXMiwYi')

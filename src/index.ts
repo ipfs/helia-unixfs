@@ -1,8 +1,6 @@
 import type { CID, Version } from 'multiformats/cid'
 import type { Blockstore } from 'interface-blockstore'
 import type { AbortOptions } from '@libp2p/interfaces'
-import type { ImportCandidate, ImportResult, UserImporterOptions } from 'ipfs-unixfs-importer'
-import { add, addStream } from './commands/add.js'
 import { cat } from './commands/cat.js'
 import { mkdir } from './commands/mkdir.js'
 import type { Mtime } from 'ipfs-unixfs'
@@ -27,10 +25,12 @@ export interface CatOptions extends AbortOptions {
 export interface ChmodOptions extends AbortOptions {
   recursive: boolean
   path?: string
+  shardSplitThresholdBytes: number
 }
 
 export interface CpOptions extends AbortOptions {
   force: boolean
+  shardSplitThresholdBytes: number
 }
 
 export interface LsOptions extends AbortOptions {
@@ -44,10 +44,11 @@ export interface MkdirOptions extends AbortOptions {
   force: boolean
   mode?: number
   mtime?: Mtime
+  shardSplitThresholdBytes: number
 }
 
 export interface RmOptions extends AbortOptions {
-
+  shardSplitThresholdBytes: number
 }
 
 export interface StatOptions extends AbortOptions {
@@ -73,22 +74,22 @@ export interface UnixFSStats {
   /**
    * The size of the file in bytes
    */
-  fileSize: number
+  fileSize: bigint
 
   /**
    * The size of the DAG that holds the file in bytes
    */
-  dagSize: number
+  dagSize: bigint
 
   /**
    * How much of the file is in the local block store
    */
-  localFileSize: number
+  localFileSize: bigint
 
   /**
    * How much of the DAG that holds the file is in the local blockstore
    */
-  localDagSize: number
+  localDagSize: bigint
 
   /**
    * How many blocks make up the DAG - nb. this will only be accurate
@@ -100,17 +101,22 @@ export interface UnixFSStats {
    * The type of file
    */
   type: 'file' | 'directory' | 'raw'
+
+  /**
+   * UnixFS metadata about this file or directory. Will not be present
+   * if the node is a `raw` type.
+   */
+  unixfs?: import('ipfs-unixfs').UnixFS
 }
 
 export interface TouchOptions extends AbortOptions {
   mtime?: Mtime
   path?: string
   recursive: boolean
+  shardSplitThresholdBytes: number
 }
 
 export interface UnixFS {
-  add: (source: Uint8Array | Iterator<Uint8Array> | AsyncIterator<Uint8Array> | ImportCandidate, options?: Partial<UserImporterOptions>) => Promise<CID>
-  addStream: (source: Iterable<ImportCandidate> | AsyncIterable<ImportCandidate>, options?: Partial<UserImporterOptions>) => AsyncGenerator<ImportResult>
   cat: (cid: CID, options?: Partial<CatOptions>) => AsyncIterable<Uint8Array>
   chmod: (source: CID, mode: number, options?: Partial<ChmodOptions>) => Promise<CID>
   cp: (source: CID, target: CID, name: string, options?: Partial<CpOptions>) => Promise<CID>
@@ -126,14 +132,6 @@ class DefaultUnixFS implements UnixFS {
 
   constructor (components: UnixFSComponents) {
     this.components = components
-  }
-
-  async add (source: Uint8Array | Iterator<Uint8Array> | AsyncIterator<Uint8Array> | ImportCandidate, options: Partial<UserImporterOptions> = {}): Promise<CID> {
-    return await add(source, this.components.blockstore, options)
-  }
-
-  async * addStream (source: Iterable<ImportCandidate> | AsyncIterable<ImportCandidate>, options: Partial<UserImporterOptions> = {}): AsyncGenerator<ImportResult> {
-    yield * addStream(source, this.components.blockstore, options)
   }
 
   async * cat (cid: CID, options: Partial<CatOptions> = {}): AsyncIterable<Uint8Array> {

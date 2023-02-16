@@ -7,6 +7,8 @@ import { unixfs, UnixFS } from '../src/index.js'
 import { MemoryBlockstore } from 'blockstore-core'
 import toBuffer from 'it-to-buffer'
 import drain from 'it-drain'
+import { importContent, importBytes } from 'ipfs-unixfs-importer'
+import { createShardedDirectory } from './fixtures/create-sharded-directory.js'
 
 const smallFile = Uint8Array.from(new Array(13).fill(0).map(() => Math.random() * 100))
 
@@ -20,11 +22,12 @@ describe('cat', () => {
 
     fs = unixfs({ blockstore })
 
-    emptyDirCid = await fs.add({ path: 'empty' })
+    const imported = await importContent({ path: 'empty' }, blockstore)
+    emptyDirCid = imported.cid
   })
 
   it('reads a small file', async () => {
-    const cid = await fs.add(smallFile)
+    const { cid } = await importBytes(smallFile, blockstore)
     const bytes = await toBuffer(fs.cat(cid))
 
     expect(bytes).to.equalBytes(smallFile)
@@ -32,7 +35,7 @@ describe('cat', () => {
 
   it('reads a file with an offset', async () => {
     const offset = 10
-    const cid = await fs.add(smallFile)
+    const { cid } = await importBytes(smallFile, blockstore)
     const bytes = await toBuffer(fs.cat(cid, {
       offset
     }))
@@ -42,7 +45,7 @@ describe('cat', () => {
 
   it('reads a file with a length', async () => {
     const length = 10
-    const cid = await fs.add(smallFile)
+    const { cid } = await importBytes(smallFile, blockstore)
     const bytes = await toBuffer(fs.cat(cid, {
       length
     }))
@@ -53,7 +56,7 @@ describe('cat', () => {
   it('reads a file with an offset and a length', async () => {
     const offset = 2
     const length = 5
-    const cid = await fs.add(smallFile)
+    const { cid } = await importBytes(smallFile, blockstore)
     const bytes = await toBuffer(fs.cat(cid, {
       offset,
       length
@@ -67,21 +70,18 @@ describe('cat', () => {
       .with.property('code', 'ERR_NOT_FILE')
   })
 
-/*
-  describe('with sharding', () => {
-    it('reads file from inside a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-      const filePath = `${shardedDirPath}/file-${Math.random()}.txt`
-      const content = Uint8Array.from([0, 1, 2, 3, 4])
+  it('reads file from inside a sharded directory', async () => {
+    const content = Uint8Array.from([0, 1, 2, 3, 4])
+    const dirCid = await createShardedDirectory(blockstore)
+    const { cid: fileCid } = await importBytes(content, blockstore)
+    const path = 'new-file.txt'
 
-      await ipfs.files.write(filePath, content, {
-        create: true
-      })
+    const updatedCid = await fs.cp(fileCid, dirCid, path)
 
-      const bytes = uint8ArrayConcat(await all(ipfs.files.read(filePath)))
+    const bytes = await toBuffer(fs.cat(updatedCid, {
+      path
+    }))
 
-      expect(bytes).to.deep.equal(content)
-    })
+    expect(bytes).to.deep.equal(content)
   })
-  */
 })

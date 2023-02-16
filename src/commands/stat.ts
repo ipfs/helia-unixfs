@@ -1,4 +1,4 @@
-import { Blockstore, exporter } from 'ipfs-unixfs-exporter'
+import { exporter } from 'ipfs-unixfs-exporter'
 import type { CID } from 'multiformats/cid'
 import type { StatOptions, UnixFSStats } from '../index.js'
 import mergeOpts from 'merge-options'
@@ -10,11 +10,12 @@ import type { AbortOptions } from '@libp2p/interfaces'
 import type { Mtime } from 'ipfs-unixfs'
 import { resolve } from './utils/resolve.js'
 import * as raw from 'multiformats/codecs/raw'
+import type { Blockstore } from 'interface-blockstore'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 const log = logger('helia:unixfs:stat')
 
-const defaultOptions = {
+const defaultOptions: StatOptions = {
 
 }
 
@@ -30,43 +31,46 @@ export async function stat (cid: CID, blockstore: Blockstore, options: Partial<S
     throw new NotUnixFSError()
   }
 
-  let fileSize: number = 0
-  let dagSize: number = 0
-  let localFileSize: number = 0
-  let localDagSize: number = 0
+  let fileSize: bigint = 0n
+  let dagSize: bigint = 0n
+  let localFileSize: bigint = 0n
+  let localDagSize: bigint = 0n
   let blocks: number = 0
   let mode: number | undefined
   let mtime: Mtime | undefined
   const type = result.type
+  let unixfs: UnixFS | undefined
 
   if (result.type === 'raw') {
-    fileSize = result.node.byteLength
-    dagSize = result.node.byteLength
-    localFileSize = result.node.byteLength
-    localDagSize = result.node.byteLength
+    fileSize = BigInt(result.node.byteLength)
+    dagSize = BigInt(result.node.byteLength)
+    localFileSize = BigInt(result.node.byteLength)
+    localDagSize = BigInt(result.node.byteLength)
     blocks = 1
   }
 
   if (result.type === 'directory') {
-    fileSize = 0
-    dagSize = result.unixfs.marshal().byteLength
-    localFileSize = 0
+    fileSize = 0n
+    dagSize = BigInt(result.unixfs.marshal().byteLength)
+    localFileSize = 0n
     localDagSize = dagSize
     blocks = 1
     mode = result.unixfs.mode
     mtime = result.unixfs.mtime
+    unixfs = result.unixfs
   }
 
   if (result.type === 'file') {
     const results = await inspectDag(resolved.cid, blockstore, opts)
 
     fileSize = result.unixfs.fileSize()
-    dagSize = (result.node.Data?.byteLength ?? 0) + result.node.Links.reduce((acc, curr) => acc + (curr.Tsize ?? 0), 0)
-    localFileSize = results.localFileSize
-    localDagSize = results.localDagSize
+    dagSize = BigInt((result.node.Data?.byteLength ?? 0) + result.node.Links.reduce((acc, curr) => acc + (curr.Tsize ?? 0), 0))
+    localFileSize = BigInt(results.localFileSize)
+    localDagSize = BigInt(results.localDagSize)
     blocks = results.blocks
     mode = result.unixfs.mode
     mtime = result.unixfs.mtime
+    unixfs = result.unixfs
   }
 
   return {
@@ -78,7 +82,8 @@ export async function stat (cid: CID, blockstore: Blockstore, options: Partial<S
     localFileSize,
     localDagSize,
     blocks,
-    type
+    type,
+    unixfs
   }
 }
 

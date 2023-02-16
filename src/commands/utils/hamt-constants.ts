@@ -1,6 +1,6 @@
 import { murmur3128 } from '@multiformats/murmur3'
 
-export const hamtHashCode = murmur3128.code
+export const hamtHashCode = BigInt(murmur3128.code)
 export const hamtBucketBits = 8
 
 export async function hamtHashFn (buf: Uint8Array): Promise<Uint8Array> {

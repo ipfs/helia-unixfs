@@ -15,19 +15,21 @@ import last from 'it-last'
 import { sha256 } from 'multiformats/hashes/sha2'
 import { resolve, updatePathCids } from './utils/resolve.js'
 import * as raw from 'multiformats/codecs/raw'
+import { SHARD_SPLIT_THRESHOLD_BYTES } from './utils/constants.js'
 
 const mergeOptions = mergeOpts.bind({ ignoreUndefined: true })
 const log = logger('helia:unixfs:touch')
 
-const defaultOptions = {
-  recursive: false
+const defaultOptions: TouchOptions = {
+  recursive: false,
+  shardSplitThresholdBytes: SHARD_SPLIT_THRESHOLD_BYTES
 }
 
 export async function touch (cid: CID, blockstore: Blockstore, options: Partial<TouchOptions> = {}): Promise<CID> {
   const opts: TouchOptions = mergeOptions(defaultOptions, options)
   const resolved = await resolve(cid, opts.path, blockstore, opts)
   const mtime = opts.mtime ?? {
-    secs: Date.now() / 1000,
+    secs: BigInt(Math.round(Date.now() / 1000)),
     nsecs: 0
   }
 
@@ -69,23 +71,26 @@ export async function touch (cid: CID, blockstore: Blockstore, options: Partial<
       (source) => importer(source, blockstore, {
         ...opts,
         pin: false,
-        dagBuilder: async function * (source, block, opts) {
+        dagBuilder: async function * (source, block) {
           for await (const entry of source) {
             yield async function () {
               // @ts-expect-error cannot derive type
               const node: PBNode = entry.content
 
               const buf = dagPB.encode(node)
-              const cid = await persist(buf, block, opts)
+              const updatedCid = await persist(buf, block, {
+                ...opts,
+                cidVersion: cid.version
+              })
 
               if (node.Data == null) {
-                throw new InvalidPBNodeError(`${cid} had no data`)
+                throw new InvalidPBNodeError(`${updatedCid} had no data`)
               }
 
               const unixfs = UnixFS.unmarshal(node.Data)
 
               return {
-                cid,
+                cid: updatedCid,
                 size: buf.length,
                 path: entry.path,
                 unixfs
@@ -101,7 +106,7 @@ export async function touch (cid: CID, blockstore: Blockstore, options: Partial<
       throw new UnknownError(`Could not chmod ${resolved.cid.toString()}`)
     }
 
-    return await updatePathCids(root.cid, resolved, blockstore, options)
+    return await updatePathCids(root.cid, resolved, blockstore, opts)
   }
 
   const block = await blockstore.get(resolved.cid)
@@ -132,5 +137,5 @@ export async function touch (cid: CID, blockstore: Blockstore, options: Partial<
 
   await blockstore.put(updatedCid, updatedBlock)
 
-  return await updatePathCids(updatedCid, resolved, blockstore, options)
+  return await updatePathCids(updatedCid, resolved, blockstore, opts)
 }

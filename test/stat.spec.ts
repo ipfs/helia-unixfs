@@ -6,6 +6,8 @@ import { unixfs, UnixFS } from '../src/index.js'
 import { MemoryBlockstore } from 'blockstore-core'
 import type { CID } from 'multiformats/cid'
 import * as dagPb from '@ipld/dag-pb'
+import { importContent, importBytes } from 'ipfs-unixfs-importer'
+import { createShardedDirectory } from './fixtures/create-sharded-directory.js'
 
 const smallFile = Uint8Array.from(new Array(13).fill(0).map(() => Math.random() * 100))
 const largeFile = Uint8Array.from(new Array(490668).fill(0).map(() => Math.random() * 100))
@@ -22,29 +24,30 @@ describe('stat', function () {
 
     fs = unixfs({ blockstore })
 
-    emptyDirCid = await fs.add({ path: 'empty' })
+    const imported = await importContent({ path: 'empty' }, blockstore)
+    emptyDirCid = imported.cid
   })
 
   it('stats an empty directory', async () => {
     await expect(fs.stat(emptyDirCid)).to.eventually.include({
-      fileSize: 0,
-      dagSize: 2,
+      fileSize: 0n,
+      dagSize: 2n,
       blocks: 1,
       type: 'directory'
     })
   })
 
   it('computes how much of the DAG is local', async () => {
-    const largeFileCid = await fs.add({ content: largeFile })
+    const { cid: largeFileCid } = await importBytes(largeFile, blockstore)
     const block = await blockstore.get(largeFileCid)
     const node = dagPb.decode(block)
 
     expect(node.Links).to.have.lengthOf(2)
 
     await expect(fs.stat(largeFileCid)).to.eventually.include({
-      fileSize: 490668,
+      fileSize: 490668n,
       blocks: 3,
-      localDagSize: 490776
+      localDagSize: 490776n
     })
 
     // remove one of the blocks so we now have an incomplete DAG
@@ -52,44 +55,44 @@ describe('stat', function () {
 
     // block count and local file/dag sizes should be smaller
     await expect(fs.stat(largeFileCid)).to.eventually.include({
-      fileSize: 490668,
+      fileSize: 490668n,
       blocks: 2,
-      localFileSize: 228524,
-      localDagSize: 228632
+      localFileSize: 228524n,
+      localDagSize: 228632n
     })
   })
 
   it('stats a raw node', async () => {
-    const fileCid = await fs.add({ content: smallFile })
+    const { cid: fileCid } = await importBytes(smallFile, blockstore)
 
     await expect(fs.stat(fileCid)).to.eventually.include({
-      fileSize: smallFile.length,
-      dagSize: 13,
+      fileSize: BigInt(smallFile.length),
+      dagSize: 13n,
       blocks: 1,
       type: 'raw'
     })
   })
 
   it('stats a small file', async () => {
-    const fileCid = await fs.add({ content: smallFile }, {
+    const { cid: fileCid } = await importBytes(smallFile, blockstore, {
       cidVersion: 0,
       rawLeaves: false
     })
 
     await expect(fs.stat(fileCid)).to.eventually.include({
-      fileSize: smallFile.length,
-      dagSize: 19,
+      fileSize: BigInt(smallFile.length),
+      dagSize: 19n,
       blocks: 1,
       type: 'file'
     })
   })
 
   it('stats a large file', async () => {
-    const cid = await fs.add({ content: largeFile })
+    const { cid } = await importBytes(largeFile, blockstore)
 
     await expect(fs.stat(cid)).to.eventually.include({
-      fileSize: largeFile.length,
-      dagSize: 490682,
+      fileSize: BigInt(largeFile.length),
+      dagSize: 490682n,
       blocks: 3,
       type: 'file'
     })
@@ -97,10 +100,10 @@ describe('stat', function () {
 
   it('should stat file with mode', async () => {
     const mode = 0o644
-    const cid = await fs.add({
+    const { cid } = await importContent({
       content: smallFile,
       mode
-    })
+    }, blockstore)
 
     await expect(fs.stat(cid)).to.eventually.include({
       mode
@@ -109,13 +112,13 @@ describe('stat', function () {
 
   it('should stat file with mtime', async function () {
     const mtime = {
-      secs: 5,
+      secs: 5n,
       nsecs: 0
     }
-    const cid = await fs.add({
+    const { cid } = await importContent({
       content: smallFile,
       mtime
-    })
+    }, blockstore)
 
     await expect(fs.stat(cid)).to.eventually.deep.include({
       mtime
@@ -126,7 +129,7 @@ describe('stat', function () {
     await expect(fs.stat(emptyDirCid)).to.eventually.include({
       type: 'directory',
       blocks: 1,
-      fileSize: 0
+      fileSize: 0n
     })
   })
 
@@ -146,7 +149,7 @@ describe('stat', function () {
 
   it('should stat dir with mtime', async function () {
     const mtime = {
-      secs: 5,
+      secs: 5n,
       nsecs: 0
     }
 
@@ -161,76 +164,41 @@ describe('stat', function () {
       mtime
     })
   })
-/*
-  it('should stat sharded dir with mode', async function () {
-    const testDir = `/test-${nanoid()}`
 
-    await ipfs.files.mkdir(testDir, { parents: true })
-    await ipfs.files.write(`${testDir}/a`, uint8ArrayFromString('Hello, world!'), {
-      create: true,
-      shardSplitThreshold: 0
+  it('sstats a sharded directory', async function () {
+    const mtime = {
+      secs: 5n,
+      nsecs: 0
+    }
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const updatedShardCid = await fs.touch(shardedDirCid, {
+      mtime
     })
 
-    const stat = await ipfs.files.stat(testDir)
-
-    await expect(isShardAtPath(testDir, ipfs)).to.eventually.be.true()
+    const stat = await fs.stat(updatedShardCid)
     expect(stat).to.have.property('type', 'directory')
+    expect(stat).to.have.nested.property('unixfs.type', 'hamt-sharded-directory')
     expect(stat).to.include({
       mode: 0o755
     })
-  })
-
-  it('should stat sharded dir with mtime', async function () {
-    const testDir = `/test-${nanoid()}`
-
-    await ipfs.files.mkdir(testDir, {
-      parents: true,
-      mtime: {
-        secs: 5,
-        nsecs: 0
-      }
-    })
-    await ipfs.files.write(`${testDir}/a`, uint8ArrayFromString('Hello, world!'), {
-      create: true,
-      shardSplitThreshold: 0
-    })
-
-    const stat = await ipfs.files.stat(testDir)
-
-    await expect(isShardAtPath(testDir, ipfs)).to.eventually.be.true()
-    expect(stat).to.have.property('type', 'directory')
     expect(stat).to.deep.include({
-      mtime: {
-        secs: 5,
-        nsecs: 0
-      }
+      mtime
     })
   })
 
-  describe('with sharding', () => {
-    it('stats a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
+  it('stats a file inside a sharded directory', async () => {
+    const shardedDirCid = await createShardedDirectory(blockstore)
+    const { cid: fileCid } = await importBytes(Uint8Array.from([0, 1, 2, 3]), blockstore, {
+      rawLeaves: false
+    })
+    const fileName = `small-file-${Math.random()}.txt`
+    const updatedShardCid = await fs.cp(fileCid, shardedDirCid, fileName)
 
-      const stats = await ipfs.files.stat(`${shardedDirPath}`)
-
-      expect(stats.type).to.equal('directory')
-      expect(stats.size).to.equal(0)
+    const stats = await fs.stat(updatedShardCid, {
+      path: fileName
     })
 
-    it('stats a file inside a sharded directory', async () => {
-      const shardedDirPath = await createShardedDirectory(ipfs)
-      const files = []
-
-      for await (const file of ipfs.files.ls(`${shardedDirPath}`)) {
-        files.push(file)
-      }
-
-      const stats = await ipfs.files.stat(`${shardedDirPath}/${files[0].name}`)
-
-      expect(stats.type).to.equal('file')
-      expect(stats.size).to.equal(7)
-    })
+    expect(stats.type).to.equal('file')
+    expect(stats.fileSize).to.equal(4n)
   })
-
-  */
 })

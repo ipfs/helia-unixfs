@@ -1,15 +1,15 @@
 import { NotADirectoryError } from '@helia/interface/errors'
-import { Blockstore, exporter } from 'ipfs-unixfs-exporter'
+import { exporter, ExporterOptions } from 'ipfs-unixfs-exporter'
 import type { CID } from 'multiformats/cid'
 import type { PBNode } from '@ipld/dag-pb'
-import type { AbortOptions } from '@libp2p/interfaces'
+import type { Blockstore } from 'interface-blockstore'
 
 export interface Directory {
   cid: CID
   node: PBNode
 }
 
-export async function cidToDirectory (cid: CID, blockstore: Blockstore, options: AbortOptions = {}): Promise<Directory> {
+export async function cidToDirectory (cid: CID, blockstore: Blockstore, options: ExporterOptions = {}): Promise<Directory> {
   const entry = await exporter(cid, blockstore, options)
 
   if (entry.type !== 'directory') {

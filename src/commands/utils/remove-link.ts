@@ -1,30 +1,37 @@
 
 import * as dagPB from '@ipld/dag-pb'
-import { CID } from 'multiformats/cid'
+import type { CID, Version } from 'multiformats/cid'
 import { logger } from '@libp2p/logger'
 import { UnixFS } from 'ipfs-unixfs'
 import {
   generatePath,
+  HamtPathSegment,
   updateHamtDirectory,
-  UpdateHamtResult
+  UpdateHamtDirectoryOptions
 } from './hamt-utils.js'
-import type { PBNode, PBLink } from '@ipld/dag-pb'
+import type { PBNode } from '@ipld/dag-pb'
 import type { Blockstore } from 'interface-blockstore'
-import { sha256 } from 'multiformats/hashes/sha2'
-import type { Bucket } from 'hamt-sharding'
 import type { Directory } from './cid-to-directory.js'
 import type { AbortOptions } from '@libp2p/interfaces'
 import { InvalidPBNodeError } from './errors.js'
 import { InvalidParametersError } from '@helia/interface/errors'
+import { exporter } from 'ipfs-unixfs-exporter'
+import { persist } from './persist.js'
+import { isOverShardThreshold } from './is-over-shard-threshold.js'
 
 const log = logger('helia:unixfs:utils:remove-link')
+
+export interface RmLinkOptions extends AbortOptions {
+  shardSplitThresholdBytes: number
+  cidVersion: Version
+}
 
 export interface RemoveLinkResult {
   node: PBNode
   cid: CID
 }
 
-export async function removeLink (parent: Directory, name: string, blockstore: Blockstore, options: AbortOptions): Promise<RemoveLinkResult> {
+export async function removeLink (parent: Directory, name: string, blockstore: Blockstore, options: RmLinkOptions): Promise<RemoveLinkResult> {
   if (parent.node.Data == null) {
     throw new InvalidPBNodeError('Parent node had no data')
   }
@@ -32,12 +39,20 @@ export async function removeLink (parent: Directory, name: string, blockstore: B
   const meta = UnixFS.unmarshal(parent.node.Data)
 
   if (meta.type === 'hamt-sharded-directory') {
-    log(`Removing ${name} from sharded directory`)
+    log(`removing ${name} from sharded directory`)
 
-    return await removeFromShardedDirectory(parent, name, blockstore, options)
+    const result = await removeFromShardedDirectory(parent, name, blockstore, options)
+
+    if (!(await isOverShardThreshold(result.node, blockstore, options.shardSplitThresholdBytes))) {
+      log('converting shard to flat directory %c', parent.cid)
+
+      return await convertToFlatDirectory(result, blockstore, options)
+    }
+
+    return result
   }
 
-  log(`Removing link ${name} regular directory`)
+  log(`removing link ${name} regular directory`)
 
   return await removeFromDirectory(parent, name, blockstore, options)
 }
@@ -49,10 +64,10 @@ const removeFromDirectory = async (parent: Directory, name: string, blockstore: 
   })
 
   const parentBlock = dagPB.encode(parent.node)
-  const hash = await sha256.digest(parentBlock)
-  const parentCid = CID.create(parent.cid.version, dagPB.code, hash)
-
-  await blockstore.put(parentCid, parentBlock, options)
+  const parentCid = await persist(parentBlock, blockstore, {
+    ...options,
+    cidVersion: parent.cid.version
+  })
 
   log(`Updated regular directory ${parentCid}`)
 
@@ -62,90 +77,177 @@ const removeFromDirectory = async (parent: Directory, name: string, blockstore: 
   }
 }
 
-const removeFromShardedDirectory = async (parent: Directory, name: string, blockstore: Blockstore, options: AbortOptions): Promise<UpdateHamtResult> => {
-  const {
-    rootBucket, path
-  } = await generatePath(parent, name, blockstore, options)
+const removeFromShardedDirectory = async (parent: Directory, name: string, blockstore: Blockstore, options: UpdateHamtDirectoryOptions): Promise<{ cid: CID, node: PBNode }> => {
+  const path = await generatePath(parent, name, blockstore, options)
+
+  // remove file from root bucket
+  const rootBucket = path[path.length - 1].bucket
+
+  if (rootBucket == null) {
+    throw new Error('Could not generate HAMT path')
+  }
 
   await rootBucket.del(name)
 
-  const {
-    node
-  } = await updateShard(parent, blockstore, path, name, options)
-
-  return await updateHamtDirectory(parent, blockstore, node.Links, rootBucket, options)
+  // update all nodes in the shard path
+  return await updateShard(path, name, blockstore, options)
 }
 
-const updateShard = async (parent: Directory, blockstore: Blockstore, positions: Array<{ bucket: Bucket<any>, prefix: string, node?: PBNode }>, name: string, options: AbortOptions): Promise<{ node: PBNode, cid: CID, size: number }> => {
-  const last = positions.pop()
+/**
+ * The `path` param is a list of HAMT path segments starting with th
+ */
+const updateShard = async (path: HamtPathSegment[], name: string, blockstore: Blockstore, options: UpdateHamtDirectoryOptions): Promise<{ node: PBNode, cid: CID }> => {
+  const fileName = `${path[0].prefix}${name}`
 
-  if (last == null) {
-    throw new InvalidParametersError('Could not find parent')
+  // skip first path segment as it is the file to remove
+  for (let i = 1; i < path.length; i++) {
+    const lastPrefix = path[i - 1].prefix
+    const segment = path[i]
+
+    if (segment.node == null) {
+      throw new InvalidParametersError('Path segment had no associated PBNode')
+    }
+
+    const link = segment.node.Links
+      .find(link => (link.Name ?? '').substring(0, 2) === lastPrefix)
+
+    if (link == null) {
+      throw new InvalidParametersError(`No link found with prefix ${lastPrefix} for file ${name}`)
+    }
+
+    if (link.Name == null) {
+      throw new InvalidParametersError(`${lastPrefix} link had no name`)
+    }
+
+    if (link.Name === fileName) {
+      log(`removing existing link ${link.Name}`)
+
+      const links = segment.node.Links.filter((nodeLink) => {
+        return nodeLink.Name !== link.Name
+      })
+
+      if (segment.bucket == null) {
+        throw new Error('Segment bucket was missing')
+      }
+
+      await segment.bucket.del(name)
+
+      const result = await updateHamtDirectory({
+        Data: segment.node.Data,
+        Links: links
+      }, blockstore, segment.bucket, options)
+
+      segment.node = result.node
+      segment.cid = result.cid
+      segment.size = result.size
+    }
+
+    if (link.Name === lastPrefix) {
+      log(`updating subshard with prefix ${lastPrefix}`)
+
+      const lastSegment = path[i - 1]
+
+      if (lastSegment.node?.Links.length === 1) {
+        log(`removing subshard for ${lastPrefix}`)
+
+        // convert subshard back to normal file entry
+        const link = lastSegment.node.Links[0]
+        link.Name = `${lastPrefix}${(link.Name ?? '').substring(2)}`
+
+        // remove existing prefix
+        segment.node.Links = segment.node.Links.filter((link) => {
+          return link.Name !== lastPrefix
+        })
+
+        // add new child
+        segment.node.Links.push(link)
+      } else {
+        // replace subshard entry
+        log(`replacing subshard for ${lastPrefix}`)
+
+        // remove existing prefix
+        segment.node.Links = segment.node.Links.filter((link) => {
+          return link.Name !== lastPrefix
+        })
+
+        if (lastSegment.cid == null) {
+          throw new Error('Did not persist previous segment')
+        }
+
+        // add new child
+        segment.node.Links.push({
+          Name: lastPrefix,
+          Hash: lastSegment.cid,
+          Tsize: lastSegment.size
+        })
+      }
+
+      if (segment.bucket == null) {
+        throw new Error('Segment bucket was missing')
+      }
+
+      const result = await updateHamtDirectory(segment.node, blockstore, segment.bucket, options)
+      segment.node = result.node
+      segment.cid = result.cid
+      segment.size = result.size
+    }
   }
 
-  const {
-    bucket,
-    prefix,
-    node
-  } = last
+  const rootSegment = path[path.length - 1]
 
-  if (node == null) {
-    throw new InvalidParametersError('Could not find parent')
+  if (rootSegment == null || rootSegment.cid == null || rootSegment.node == null) {
+    throw new InvalidParametersError('Failed to update shard')
   }
 
-  const link = node.Links
-    .find(link => (link.Name ?? '').substring(0, 2) === prefix)
+  return {
+    cid: rootSegment.cid,
+    node: rootSegment.node
+  }
+}
 
-  if (link == null) {
-    throw new InvalidParametersError(`No link found with prefix ${prefix} for file ${name}`)
+const convertToFlatDirectory = async (parent: Directory, blockstore: Blockstore, options: RmLinkOptions): Promise<RemoveLinkResult> => {
+  if (parent.node.Data == null) {
+    throw new InvalidParametersError('Invalid parent passed to convertToFlatDirectory')
   }
 
-  if (link.Name === `${prefix}${name}`) {
-    log(`Removing existing link ${link.Name}`)
+  const rootNode: PBNode = {
+    Links: []
+  }
+  const dir = await exporter(parent.cid, blockstore)
 
-    const links = node.Links.filter((nodeLink) => {
-      return nodeLink.Name !== link.Name
+  if (dir.type !== 'directory') {
+    throw new Error('Unexpected node type')
+  }
+
+  for await (const entry of dir.content()) {
+    let tsize = 0
+
+    if (entry.node instanceof Uint8Array) {
+      tsize = entry.node.byteLength
+    } else {
+      tsize = dagPB.encode(entry.node).length
+    }
+
+    rootNode.Links.push({
+      Hash: entry.cid,
+      Name: entry.name,
+      Tsize: tsize
     })
-
-    await bucket.del(name)
-
-    parent.node = node
-
-    return await updateHamtDirectory(parent, blockstore, links, bucket, options)
   }
 
-  log(`Descending into sub-shard ${link.Name} for ${prefix}${name}`)
+  // copy mode/mtime over if set
+  const oldUnixfs = UnixFS.unmarshal(parent.node.Data)
+  rootNode.Data = new UnixFS({ type: 'directory', mode: oldUnixfs.mode, mtime: oldUnixfs.mtime }).marshal()
+  const block = dagPB.encode(dagPB.prepare(rootNode))
 
-  const result = await updateShard(parent, blockstore, positions, name, options)
-
-  const child: Required<PBLink> = {
-    Hash: result.cid,
-    Tsize: result.size,
-    Name: prefix
-  }
-
-  if (result.node.Links.length === 1) {
-    log(`Removing subshard for ${prefix}`)
-
-    // convert shard back to normal dir
-    const link = result.node.Links[0]
-
-    child.Name = `${prefix}${(link.Name ?? '').substring(2)}`
-    child.Hash = link.Hash
-    child.Tsize = link.Tsize ?? 0
-  }
-
-  log(`Updating shard ${prefix} with name ${child.Name}`)
-
-  return await updateShardParent(parent, child, prefix, blockstore, bucket, options)
-}
-
-const updateShardParent = async (parent: Directory, child: Required<PBLink>, oldName: string, blockstore: Blockstore, bucket: Bucket<any>, options: AbortOptions): Promise<UpdateHamtResult> => {
-  // Remove existing link if it exists
-  const parentLinks = parent.node.Links.filter((link) => {
-    return link.Name !== oldName
+  const cid = await persist(block, blockstore, {
+    codec: dagPB,
+    cidVersion: parent.cid.version,
+    signal: options.signal
   })
-  parentLinks.push(child)
 
-  return await updateHamtDirectory(parent, blockstore, parentLinks, bucket, options)
+  return {
+    cid,
+    node: rootNode
+  }
 }

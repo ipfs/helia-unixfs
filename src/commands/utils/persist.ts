@@ -1,18 +1,23 @@
-import { CID, Version } from 'multiformats/cid'
-import * as dagPB from '@ipld/dag-pb'
+import { CID } from 'multiformats/cid'
+import * as dagPb from '@ipld/dag-pb'
 import { sha256 } from 'multiformats/hashes/sha2'
-import type { BlockCodec } from 'multiformats/codecs/interface'
-import type { AbortOptions } from '@libp2p/interfaces'
 import type { Blockstore } from 'interface-blockstore'
+import type { BlockCodec } from 'multiformats/codecs/interface'
+import type { Version as CIDVersion } from 'multiformats/cid'
 
-export interface PersistOptions extends AbortOptions {
+export interface PersistOptions {
   codec?: BlockCodec<any, any>
-  cidVersion?: Version
+  cidVersion: CIDVersion
+  signal?: AbortSignal
 }
 
-export const persist = async (buffer: Uint8Array, blockstore: Blockstore, options: PersistOptions = {}): Promise<CID> => {
+export const persist = async (buffer: Uint8Array, blockstore: Blockstore, options: PersistOptions): Promise<CID> => {
+  if (options.codec == null) {
+    options.codec = dagPb
+  }
+
   const multihash = await sha256.digest(buffer)
-  const cid = CID.create(options.cidVersion ?? 1, dagPB.code, multihash)
+  const cid = CID.create(options.cidVersion, options.codec.code, multihash)
 
   await blockstore.put(cid, buffer, {
     signal: options.signal
