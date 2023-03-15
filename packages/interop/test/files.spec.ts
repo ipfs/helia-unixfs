@@ -29,7 +29,7 @@ describe('unixfs interop', () => {
     return result.cid
   }
 
-  async function expectSameCid (data: () => FileCandidate, heliaOpts: Partial<ImporterOptions> = {}, kuboOpts: AddOptions = {}) {
+  async function expectSameCid (data: () => FileCandidate, heliaOpts: Partial<ImporterOptions> = {}, kuboOpts: AddOptions = {}): Promise<void> {
     const heliaCid = await importToHelia(data(), {
       // these are the default kubo options
       cidVersion: 0,
@@ -65,7 +65,7 @@ describe('unixfs interop', () => {
   })
 
   it('should create the same CID for a small file', async () => {
-    const candidate = () => ({
+    const candidate = (): FileCandidate => ({
       content: Uint8Array.from([0, 1, 2, 3, 4])
     })
 
@@ -76,12 +76,12 @@ describe('unixfs interop', () => {
     const chunkSize = 1024 * 1024
     const size = chunkSize * 10
 
-    const candidate = () => ({
-      content: async function * () {
+    const candidate = (): FileCandidate => ({
+      content: (async function * () {
         for (let i = 0; i < size; i += chunkSize) {
           yield new Uint8Array(chunkSize)
         }
-      }()
+      }())
     })
 
     await expectSameCid(candidate)
