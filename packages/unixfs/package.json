@@ -165,5 +165,8 @@
     "it-first": "^2.0.0",
     "it-to-buffer": "^3.0.0",
     "uint8arrays": "^4.0.3"
+  },
+  "typedoc": {
+    "entryPoint": "./src/index.ts"
   }
 }
