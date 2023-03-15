@@ -37,7 +37,7 @@ Loading this module through a script tag will make it's exports available as `He
 
 ## API Docs
 
-- <https://ipfs.github.io/helia-unixfs>
+- <https://ipfs.github.io/helia-unixfs/modules/_helia_unixfs.html>
 
 ## License
 

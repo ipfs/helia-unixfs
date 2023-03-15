@@ -11,7 +11,7 @@
 [![codecov](https://img.shields.io/codecov/c/github/ipfs/helia-ipns.svg?style=flat-square)](https://codecov.io/gh/ipfs/helia-ipns)
 [![CI](https://img.shields.io/github/actions/workflow/status/ipfs/helia-ipns/js-test-and-release.yml?branch=main\&style=flat-square)](https://github.com/ipfs/helia-ipns/actions/workflows/js-test-and-release.yml?query=branch%3Amain)
 
-> An implementation of IPNS for Helia
+> An implementation of Unixfs for Helia
 
 ## Table of contents <!-- omit in toc -->
 
@@ -22,12 +22,12 @@
 
 ## Structure
 
-- [`/packages/interop`](./packages/interop) Interop tests for @helia/ipns
-- [`/packages/ipns`](./packages/ipns) An implementation of IPNS for Helia
+- [`/packages/interop`](./packages/interop) Interop tests for @helia/unixfs
+- [`/packages/unixfs`](./packages/unixfs) A Helia-compatible wrapper for UnixFS
 
 ## API Docs
 
-- <https://ipfs.github.io/helia-ipns>
+- <https://ipfs.github.io/helia-unixfs>
 
 ## License
 
@@ -38,7 +38,7 @@ Licensed under either of
 
 ## Contribute
 
-Contributions welcome! Please check out [the issues](https://github.com/ipfs/helia-ipns/issues).
+Contributions welcome! Please check out [the issues](https://github.com/ipfs/helia-unixfs/issues).
 
 Also see our [contributing document](https://github.com/ipfs/community/blob/master/CONTRIBUTING_JS.md) for more information on how we work, and about contributing in general.
 

@@ -3,7 +3,7 @@
   "version": "1.0.5",
   "description": "A Helia-compatible wrapper for UnixFS",
   "license": "Apache-2.0 OR MIT",
-  "homepage": "https://github.com/ipfs/helia-unixfs#readme",
+  "homepage": "https://github.com/ipfs/helia-unixfs/tree/master/packages/unixfs#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ipfs/helia-unixfs.git"
