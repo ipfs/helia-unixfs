@@ -160,7 +160,7 @@
     "aegir": "^38.1.0",
     "blockstore-core": "^4.0.1",
     "delay": "^5.0.0",
-    "it-all": "^2.0.0",
+    "it-all": "^3.0.1",
     "it-drain": "^2.0.0",
     "it-first": "^2.0.0",
     "it-to-buffer": "^3.0.0",
