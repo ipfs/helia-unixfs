@@ -3,6 +3,7 @@
 import { type UnixFS, unixfs } from '@helia/unixfs'
 import { expect } from 'aegir/chai'
 import toBuffer from 'it-to-buffer'
+import { identifyService } from 'libp2p/identify'
 import { createHeliaNode } from './fixtures/create-helia.js'
 import { createKuboNode } from './fixtures/create-kubo.js'
 import type { Helia } from '@helia/interface'
@@ -15,7 +16,11 @@ describe('unixfs bitswap interop', () => {
   let kubo: Controller
 
   beforeEach(async () => {
-    helia = await createHeliaNode()
+    helia = await createHeliaNode({
+      services: {
+        identify: identifyService()
+      }
+    })
     unixFs = unixfs(helia)
     kubo = await createKuboNode()
 
