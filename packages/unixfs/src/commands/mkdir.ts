@@ -9,7 +9,7 @@ import { addLink } from './utils/add-link.js'
 import { cidToDirectory } from './utils/cid-to-directory.js'
 import { cidToPBLink } from './utils/cid-to-pblink.js'
 import { SHARD_SPLIT_THRESHOLD_BYTES } from './utils/constants.js'
-import { InvalidParametersError, NotADirectoryError } from './utils/errors.js'
+import { InvalidParametersError, NotADirectoryError } from '../errors.js'
 import type { MkdirOptions } from '../index.js'
 import type { Blocks } from '@helia/interface/blocks'
 
