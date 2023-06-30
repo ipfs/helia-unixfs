@@ -106,7 +106,7 @@ describe('glob-source', () => {
       return this.skip()
     }
 
-    const result = await all(globSource(fixtureDir(), 'dir/**/!(file-1.txt)*'))
+    const result = await all(globSource(fixtureDir(), 'dir/**/!(file-1.txt)'))
 
     expect(result).to.have.lengthOf(4)
     expect(result).to.not.containSubset([{
