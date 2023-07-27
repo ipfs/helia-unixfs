@@ -174,7 +174,7 @@
     "sparse-array": "^1.3.2"
   },
   "devDependencies": {
-    "aegir": "^39.0.8",
+    "aegir": "^40.0.1",
     "blockstore-core": "^4.0.1",
     "delay": "^6.0.0",
     "iso-url": "^1.2.1",
