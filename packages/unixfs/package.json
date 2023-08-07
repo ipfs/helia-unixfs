@@ -158,7 +158,7 @@
     "@helia/interface": "^1.0.0",
     "@ipld/dag-pb": "^4.0.0",
     "@libp2p/interfaces": "^3.3.1",
-    "@libp2p/logger": "^2.0.6",
+    "@libp2p/logger": "^3.0.1",
     "@multiformats/murmur3": "^2.1.2",
     "hamt-sharding": "^3.0.2",
     "interface-blockstore": "^5.0.0",
