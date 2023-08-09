@@ -57,7 +57,7 @@
     "aegir": "^39.0.8",
     "blockstore-core": "^4.0.1",
     "datastore-core": "^9.0.3",
-    "go-ipfs": "^0.20.0",
+    "go-ipfs": "^0.22.0",
     "helia": "^1.0.0",
     "ipfs-core-types": "^0.14.0",
     "ipfs-unixfs-importer": "^15.1.0",
