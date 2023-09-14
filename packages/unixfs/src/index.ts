@@ -384,7 +384,7 @@ export interface UnixFS {
    * @example
    *
    * ```typescript
-   * import fs from 'node:fs'
+   * import fs from 'fs'
    *
    * const stream = fs.createReadStream('./foo.txt')
    * const cid = await fs.addByteStream(stream)

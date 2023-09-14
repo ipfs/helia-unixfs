@@ -186,9 +186,8 @@
   },
   "browser": {
     "./dist/src/utils/glob-source.js": false,
-    "node:fs": false,
-    "node:fs/promises": false,
-    "node:path": false,
-    "node:url": false
+    "fs": false,
+    "path": false,
+    "url": false
   }
 }
