@@ -58,7 +58,7 @@
     "aegir": "^41.0.0",
     "blockstore-core": "^4.0.1",
     "datastore-core": "^9.0.3",
-    "go-ipfs": "^0.22.0",
+    "kubo": "^0.24.0",
     "helia": "^2.0.1",
     "ipfs-core-types": "^0.14.0",
     "ipfs-unixfs-importer": "^15.1.0",
@@ -72,7 +72,7 @@
   },
   "browser": {
     "./dist/test/fixtures/create-helia.js": "./dist/test/fixtures/create-helia.browser.js",
-    "go-ipfs": false
+    "kubo": false
   },
   "private": true
 }
