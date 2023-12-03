@@ -27,6 +27,9 @@ export async function createHeliaNode (config: Libp2pOptions = {}): Promise<Heli
     services: {
       identify: identifyService()
     },
+    connectionManager: {
+      minConnections: 0
+    },
     ...config
   })
 

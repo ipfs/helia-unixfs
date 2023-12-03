@@ -18,6 +18,9 @@ export async function createKuboNode (options: ControllerOptions<'go'> = {}): Pr
             '/ip4/0.0.0.0/tcp/4001',
             '/ip4/0.0.0.0/tcp/4002/ws'
           ]
+        },
+        Routing: {
+          Type: 'none'
         }
       }
     }

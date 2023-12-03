@@ -14,7 +14,6 @@ export async function createHeliaNode (config: Libp2pOptions = {}): Promise<Heli
   const blockstore = new MemoryBlockstore()
   const datastore = new MemoryDatastore()
 
-  // dial-only in the browser until webrtc browser-to-browser arrives
   const libp2p = await createLibp2p({
     transports: [
       webSockets({
@@ -34,6 +33,10 @@ export async function createHeliaNode (config: Libp2pOptions = {}): Promise<Heli
     connectionGater: {
       denyDialMultiaddr: async () => false
     },
+    connectionManager: {
+      minConnections: 0
+    },
+    peerDiscovery: [],
     ...config
   })
 
