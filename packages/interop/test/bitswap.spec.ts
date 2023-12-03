@@ -19,8 +19,19 @@ describe('unixfs bitswap interop', () => {
     unixFs = unixfs(helia)
     kubo = await createKuboNode()
 
+    const identify = new Promise<void>((resolve) => {
+      helia.libp2p.addEventListener('peer:identify', (evt) => {
+        if (evt.detail.peerId.equals(kubo.peer.id)) {
+          resolve()
+        }
+      })
+    })
+
     // connect helia to kubo
     await helia.libp2p.dial(kubo.peer.addresses)
+
+    // wait for identify to complete
+    await identify
   })
 
   afterEach(async () => {
