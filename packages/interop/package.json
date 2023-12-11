@@ -48,7 +48,7 @@
     "test:electron-main": "aegir test -t electron-main"
   },
   "devDependencies": {
-    "@chainsafe/libp2p-noise": "^13.0.1",
+    "@chainsafe/libp2p-noise": "^14.1.0",
     "@chainsafe/libp2p-yamux": "^5.0.0",
     "@helia/interface": "^2.0.0",
     "@helia/unixfs": "^1.0.0",
