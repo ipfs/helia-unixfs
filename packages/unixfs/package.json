@@ -182,7 +182,7 @@
     "it-drain": "^3.0.1",
     "it-first": "^3.0.1",
     "it-to-buffer": "^4.0.1",
-    "uint8arrays": "^4.0.3",
+    "uint8arrays": "^5.0.1",
     "wherearewe": "^2.0.1"
   },
   "browser": {
