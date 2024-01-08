@@ -3,13 +3,17 @@
   "version": "0.0.0",
   "description": "Interop tests for @helia/unixfs",
   "license": "Apache-2.0 OR MIT",
-  "homepage": "https://github.com/ipfs/helia-unixfs/tree/master/packages/interop#readme",
+  "homepage": "https://github.com/ipfs/helia-unixfs/tree/main/packages/interop#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ipfs/helia-unixfs.git"
   },
   "bugs": {
     "url": "https://github.com/ipfs/helia-unixfs/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   },
   "keywords": [
     "IPFS"
